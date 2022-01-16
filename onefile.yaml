@@ -206,7 +206,7 @@ kind: Ingress
 metadata:
   name: wordpress-ingress
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /$1
+    nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
   rules:
     - host: ec2-3-89-92-123.compute-1.amazonaws.com
