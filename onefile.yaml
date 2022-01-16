@@ -1,0 +1,221 @@
+---
+apiVersion: v1
+data:
+  mysql_pwd: d29yZHByZXNz
+  mysql_user: d29yZHByZXNz
+kind: Secret
+metadata:
+  creationTimestamp: null
+  name: mysql-secret
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: wp-pv
+spec:
+  accessModes:
+  - ReadWriteOnce
+  hostPath:
+    path: /data
+  capacity:
+    storage: 10Gi
+  storageClassName: wp
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mysql-pv
+spec:
+  accessModes:
+  - ReadWriteOnce
+  hostPath:
+    path: /db-data
+  capacity:
+    storage: 10Gi
+  storageClassName: mysql
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app: wp
+  name: wp-pvc
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: wp
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app: mysql
+  name: mysql-pvc
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: mysql
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: 
+  name: wordpress-deployment
+  labels: 
+    app: wordpress
+spec:
+  replicas: 2
+  strategy: 
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+  selector: 
+    matchLabels: 
+      app: wordpress
+  template:
+    metadata:
+      name: wordpress
+      labels:
+        app: wordpress
+    spec:
+      containers:
+       - name: wordpress-pod
+         image: wordpress
+         ports:
+          - containerPort: 80
+         env: 
+          - name: WORDPRESS_DB_HOST
+            value: mysql-svc
+          - name: WORDPRESS_DB_USER
+            valueFrom:
+              secretKeyRef:
+                name: mysql-secret
+                key: mysql_user
+          - name: WORDPRESS_DB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: mysql-secret
+                key: mysql_pwd
+          - name: WORDPRESS_DB_NAME
+            value: wordpress-db
+  #lien du volume à utiliser pour cet hote
+         volumeMounts:
+          - mountPath: /var/www/html
+            name: data-volume
+  #creation du volume        
+      volumes:
+        - name: data-volume
+          persistentVolumeClaim: 
+            claimName: wp-pvc
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: 
+  name: mysql-deployment
+  labels: 
+    app: mysql
+spec:
+  replicas: 1
+  strategy: 
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  selector: 
+    matchLabels: 
+      app: mysql
+  template:
+    metadata:
+      name: mysql-db
+      labels:
+        app: mysql
+    spec:
+      containers:
+       - name: mysql-pod
+         image: mysql
+         ports:
+          - containerPort: 3306
+         env: 
+          - name: MYSQL_DATABASE
+            value: wordpress-db
+          - name: MYSQL_USER
+            valueFrom:
+              secretKeyRef:
+                name: mysql-secret
+                key: mysql_user
+          - name: MYSQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: mysql-secret
+                key: mysql_pwd
+          - name: MYSQL_ROOT_PASSWORD
+            value: password
+         volumeMounts:
+          - mountPath: /var/lib/mysql
+            name: db-data        
+      volumes:
+        - name: db-data
+          persistentVolumeClaim: 
+            claimName: mysql-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-svc
+  labels:
+    app: mysql
+spec:
+  selector:
+    app: mysql
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3306
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wordpress-svc
+spec:
+  type: NodePort
+  ports:
+   - protocol: TCP
+     targetPort: 80
+     port: 80
+     nodePort: 30008
+  selector:
+    app: wordpress
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: wordpress-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+spec:
+  rules:
+    - host: ec2-3-89-92-123.compute-1.amazonaws.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: wordpress-svc
+                port:
+                  number: 80
